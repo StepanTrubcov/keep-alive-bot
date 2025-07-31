@@ -1,17 +1,27 @@
 const { Telegraf } = require('telegraf');
 const axios = require('axios');
 const cron = require('node-cron');
+const express = require('express'); // Добавляем Express
 
 // Конфигурация
-const BOT_TOKEN = process.env.BOT_TOKEN || '8147456024:AAEEoEG3_V2SI2F8iWxlToaWH4JPMunlqx4'; // Токен из переменных окружения
+const BOT_TOKEN = process.env.BOT_TOKEN || '';
 const TARGET_SERVERS = [
   'https://assistant-in-singing-tg.onrender.com/ping',
-  process.env.RENDER_EXTERNAL_URL // Добавляем самопинг своего же сервера
-].filter(Boolean); // Убираем пустые значения
+  process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL}/ping` : null
+].filter(Boolean);
 const PING_INTERVAL_MINUTES = process.env.PING_INTERVAL_MINUTES || 5;
-const SELF_PING_INTERVAL_MINUTES = 10; // Меньше 15 минут, чтобы Render не усыплял
+const SELF_PING_INTERVAL_MINUTES = 14;
+const PORT = process.env.PORT || 3000; // Render автоматически назначает порт
 
 const bot = new Telegraf(BOT_TOKEN);
+const app = express(); // Создаем Express приложение
+
+// Middleware для обработки веб-запросов
+app.use(express.json());
+app.get('/ping', (req, res) => {
+  console.log('✅ Получен запрос на /ping');
+  res.status(200).json({ status: 'ok', time: new Date().toISOString() });
+});
 
 // Функция для самопинга
 async function pingSelf() {
@@ -60,15 +70,12 @@ async function pingAllServers() {
 }
 
 function setupPingSchedule() {
-  // Пингуем сразу при запуске
   pingAllServers();
   
-  // Затем каждые N минут пингуем целевые серверы
   cron.schedule(`*/${PING_INTERVAL_MINUTES} * * * *`, () => {
     pingAllServers();
   });
   
-  // Самопинг каждые 14 минут
   cron.schedule(`*/${SELF_PING_INTERVAL_MINUTES} * * * *`, () => {
     pingSelf();
   });
@@ -130,13 +137,17 @@ bot.command('status', async (ctx) => {
 });
 
 // Запуск бота
-bot.launch()
-  .then(() => {
-    console.log('Keep-alive бот запущен!');
-    setupPingSchedule();
-  })
-  .catch(err => console.error('Ошибка запуска бота:', err));
+app.listen(PORT, () => {
+  console.log(`HTTP сервер запущен на порту ${PORT}`);
+  
+  // Запускаем бота после старта сервера
+  bot.launch()
+    .then(() => {
+      console.log('Keep-alive бот запущен!');
+      setupPingSchedule();
+    })
+    .catch(err => console.error('Ошибка запуска бота:', err));
+});
 
-// Обработка завершения процесса
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
