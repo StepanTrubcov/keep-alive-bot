@@ -3,13 +3,29 @@ const axios = require('axios');
 const cron = require('node-cron');
 
 // Конфигурация
-const BOT_TOKEN = '8147456024:AAEEoEG3_V2SI2F8iWxlToaWH4JPMunlqx4'; // Токен этого бота-пингера
-const TARGET_SERVERS = [ 
-  'https://assistant-in-singing-tg.onrender.com/ping' 
-];
-const PING_INTERVAL_MINUTES = 5; // Интервал пинга в минутах
+const BOT_TOKEN = process.env.BOT_TOKEN || '8147456024:AAEEoEG3_V2SI2F8iWxlToaWH4JPMunlqx4'; // Токен из переменных окружения
+const TARGET_SERVERS = [
+  'https://assistant-in-singing-tg.onrender.com/ping',
+  process.env.RENDER_EXTERNAL_URL // Добавляем самопинг своего же сервера
+].filter(Boolean); // Убираем пустые значения
+const PING_INTERVAL_MINUTES = process.env.PING_INTERVAL_MINUTES || 5;
+const SELF_PING_INTERVAL_MINUTES = 10; // Меньше 15 минут, чтобы Render не усыплял
 
 const bot = new Telegraf(BOT_TOKEN);
+
+// Функция для самопинга
+async function pingSelf() {
+  if (!process.env.RENDER_EXTERNAL_URL) return;
+  
+  try {
+    const start = Date.now();
+    await axios.get(`${process.env.RENDER_EXTERNAL_URL}/ping`, { timeout: 5000 });
+    const pingTime = Date.now() - start;
+    console.log(`🔄 [${new Date().toISOString()}] Самопинг успешен (${pingTime}мс)`);
+  } catch (error) {
+    console.warn(`⚠️ Ошибка самопинга: ${error.message}`);
+  }
+}
 
 async function pingServer(url, retries = 3) {
   for (let i = 0; i < retries; i++) {
@@ -47,13 +63,27 @@ function setupPingSchedule() {
   // Пингуем сразу при запуске
   pingAllServers();
   
-  // Затем каждые 5 минут
+  // Затем каждые N минут пингуем целевые серверы
   cron.schedule(`*/${PING_INTERVAL_MINUTES} * * * *`, () => {
     pingAllServers();
   });
   
-  console.log(`Настроен регулярный пинг каждые ${PING_INTERVAL_MINUTES} минут`);
+  // Самопинг каждые 14 минут
+  cron.schedule(`*/${SELF_PING_INTERVAL_MINUTES} * * * *`, () => {
+    pingSelf();
+  });
+  
+  console.log(`Настроен регулярный пинг каждые ${PING_INTERVAL_MINUTES} минут и самопинг каждые ${SELF_PING_INTERVAL_MINUTES} минут`);
 }
+
+// Добавляем обработчик для веб-запросов (для самопинга)
+bot.telegram.setWebhook(''); // Отключаем вебхук если был
+bot.use((ctx, next) => {
+  if (ctx.updateType === 'message' && ctx.message.text) return next();
+  if (ctx.updateType === 'callback_query') return next();
+  ctx.reply('Я работаю! ✅'); // Ответ на любой другой запрос
+  return;
+});
 
 bot.command('ping', async (ctx) => {
   const loadingMsg = await ctx.reply('⏳ Пингуем серверы...');
