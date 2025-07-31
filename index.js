@@ -7,6 +7,7 @@ const express = require('express'); // Добавляем Express
 const BOT_TOKEN = process.env.BOT_TOKEN || '8147456024:AAEEoEG3_V2SI2F8iWxlToaWH4JPMunlqx4';
 const TARGET_SERVERS = [
   'https://assistant-in-singing-tg.onrender.com/ping',
+  'https://kruki.onrender.com/',
   process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL}/ping` : null
 ].filter(Boolean);
 const PING_INTERVAL_MINUTES = process.env.PING_INTERVAL_MINUTES || 5;
