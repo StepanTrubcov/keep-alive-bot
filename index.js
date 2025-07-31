@@ -4,7 +4,7 @@ const cron = require('node-cron');
 const express = require('express'); // Добавляем Express
 
 // Конфигурация
-const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const BOT_TOKEN = process.env.BOT_TOKEN || '8147456024:AAEEoEG3_V2SI2F8iWxlToaWH4JPMunlqx4';
 const TARGET_SERVERS = [
   'https://assistant-in-singing-tg.onrender.com/ping',
   process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL}/ping` : null
