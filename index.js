@@ -1,21 +1,22 @@
 const { Telegraf } = require('telegraf');
 const axios = require('axios');
 const cron = require('node-cron');
-const express = require('express'); // Добавляем Express
+const express = require('express');
 
 // Конфигурация
 const BOT_TOKEN = process.env.BOT_TOKEN || '8147456024:AAEEoEG3_V2SI2F8iWxlToaWH4JPMunlqx4';
+const YOUR_CHAT_ID = process.env.YOUR_CHAT_ID || '5102803347'; // Ваш ID чата с ботом
 const TARGET_SERVERS = [
   'https://assistant-in-singing-tg.onrender.com/ping',
   'https://kruki.onrender.com/',
   process.env.RENDER_EXTERNAL_URL ? `${process.env.RENDER_EXTERNAL_URL}/ping` : null
 ].filter(Boolean);
 const PING_INTERVAL_MINUTES = process.env.PING_INTERVAL_MINUTES || 5;
-const SELF_PING_INTERVAL_MINUTES = 14;
-const PORT = process.env.PORT || 3000; // Render автоматически назначает порт
+const SELF_PING_INTERVAL_MINUTES = 5;
+const PORT = process.env.PORT || 3000;
 
 const bot = new Telegraf(BOT_TOKEN);
-const app = express(); // Создаем Express приложение
+const app = express();
 
 // Middleware для обработки веб-запросов
 app.use(express.json());
@@ -23,6 +24,15 @@ app.get('/ping', (req, res) => {
   console.log('✅ Получен запрос на /ping');
   res.status(200).json({ status: 'ok', time: new Date().toISOString() });
 });
+
+// Функция для отправки уведомлений
+async function sendNotification(message) {
+  try {
+    await bot.telegram.sendMessage(YOUR_CHAT_ID, message, { parse_mode: 'HTML' });
+  } catch (error) {
+    console.error('Ошибка отправки уведомления:', error);
+  }
+}
 
 // Функция для самопинга
 async function pingSelf() {
@@ -32,9 +42,13 @@ async function pingSelf() {
     const start = Date.now();
     await axios.get(`${process.env.RENDER_EXTERNAL_URL}/ping`, { timeout: 5000 });
     const pingTime = Date.now() - start;
-    console.log(`🔄 [${new Date().toISOString()}] Самопинг успешен (${pingTime}мс)`);
+    const message = `🔄 <b>Самопинг успешен!</b>\nВремя: ${pingTime}мс\nСервер: ${process.env.RENDER_EXTERNAL_URL}`;
+    console.log(`[${new Date().toISOString()}] ${message}`);
+    await sendNotification(message);
   } catch (error) {
-    console.warn(`⚠️ Ошибка самопинга: ${error.message}`);
+    const message = `⚠️ <b>Ошибка самопинга!</b>\n${error.message}\nСервер: ${process.env.RENDER_EXTERNAL_URL}`;
+    console.warn(`[${new Date().toISOString()}] ${message}`);
+    await sendNotification(message);
   }
 }
 
@@ -45,10 +59,19 @@ async function pingServer(url, retries = 3) {
       const response = await axios.get(url, { timeout: 10000 });
       const pingTime = Date.now() - start;
       
-      console.log(`✅ [${new Date().toISOString()}] Успешный пинг ${url} (${pingTime}мс)`);
+      const message = `✅ <b>Успешный пинг!</b>\nСервер: ${url}\nВремя: ${pingTime}мс\nКод ответа: ${response.status}`;
+      console.log(`[${new Date().toISOString()}] ${message}`);
+      await sendNotification(message);
+      
       return { success: true, pingTime };
     } catch (error) {
-      console.warn(`⚠️ Попытка ${i+1}/${retries}: Ошибка пинга ${url} - ${error.message}`);
+      const message = `⚠️ Попытка ${i+1}/${retries}: <b>Ошибка пинга</b>\nСервер: ${url}\nОшибка: ${error.message}`;
+      console.warn(`[${new Date().toISOString()}] ${message}`);
+      
+      if (i === retries - 1) {
+        await sendNotification(`❌ <b>Пинг неуспешен после ${retries} попыток</b>\nСервер: ${url}\nПоследняя ошибка: ${error.message}`);
+      }
+      
       if (i < retries - 1) await new Promise(resolve => setTimeout(resolve, 5000));
     }
   }
@@ -57,6 +80,7 @@ async function pingServer(url, retries = 3) {
 
 async function pingAllServers() {
   console.log(`\n=== Начало цикла пинга в ${new Date().toISOString()} ===`);
+  await sendNotification(`🔄 <b>Начало цикла пинга</b>\nВремя: ${new Date().toLocaleString()}`);
   
   const results = await Promise.all(
     TARGET_SERVERS.map(url => pingServer(url))
@@ -65,7 +89,9 @@ async function pingAllServers() {
   const failed = results.filter(r => !r.success).length;
   const success = results.length - failed;
   
-  console.log(`=== Результаты: ${success} успешно, ${failed} с ошибками ===\n`);
+  const summaryMessage = `📊 <b>Итоги пинга:</b>\nУспешно: ${success}/${TARGET_SERVERS.length}\nОшибки: ${failed}\nВремя: ${new Date().toLocaleString()}`;
+  console.log(`[${new Date().toISOString()}] ${summaryMessage}`);
+  await sendNotification(summaryMessage);
   
   return results;
 }
@@ -82,20 +108,12 @@ function setupPingSchedule() {
   });
   
   console.log(`Настроен регулярный пинг каждые ${PING_INTERVAL_MINUTES} минут и самопинг каждые ${SELF_PING_INTERVAL_MINUTES} минут`);
+  sendNotification(`🤖 <b>Бот запущен!</b>\nРегулярный пинг каждые ${PING_INTERVAL_MINUTES} мин\nСамопинг каждые ${SELF_PING_INTERVAL_MINUTES} мин`);
 }
 
-// Добавляем обработчик для веб-запросов (для самопинга)
-bot.telegram.setWebhook(''); // Отключаем вебхук если был
-bot.use((ctx, next) => {
-  if (ctx.updateType === 'message' && ctx.message.text) return next();
-  if (ctx.updateType === 'callback_query') return next();
-  ctx.reply('Я работаю! ✅'); // Ответ на любой другой запрос
-  return;
-});
-
+// Обработчики команд бота
 bot.command('ping', async (ctx) => {
   const loadingMsg = await ctx.reply('⏳ Пингуем серверы...');
-  
   const results = await pingAllServers();
   const successCount = results.filter(r => r.success).length;
   
@@ -137,17 +155,19 @@ bot.command('status', async (ctx) => {
   }
 });
 
-// Запуск бота
+// Запуск сервера и бота
 app.listen(PORT, () => {
   console.log(`HTTP сервер запущен на порту ${PORT}`);
   
-  // Запускаем бота после старта сервера
   bot.launch()
     .then(() => {
       console.log('Keep-alive бот запущен!');
       setupPingSchedule();
     })
-    .catch(err => console.error('Ошибка запуска бота:', err));
+    .catch(err => {
+      console.error('Ошибка запуска бота:', err);
+      sendNotification(`‼️ <b>Ошибка запуска бота!</b>\n${err.message}`);
+    });
 });
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
