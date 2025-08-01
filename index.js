@@ -5,18 +5,21 @@ const express = require('express');
 
 // Конфигурация
 const BOT_TOKEN = process.env.BOT_TOKEN || '8147456024:AAEEoEG3_V2SI2F8iWxlToaWH4JPMunlqx4';
-const YOUR_CHAT_ID = process.env.YOUR_CHAT_ID || '5102803347'; // Ваш ID чата с ботом
+const YOUR_CHAT_ID = process.env.YOUR_CHAT_ID || '5102803347';
 const TARGET_SERVERS = [
   'https://assistant-in-singing-tg.onrender.com/ping',
   'https://kruki.onrender.com/',
-  'https://keep-alive-bot-j0yl.onrender.com/ping'                                                   
+  'https://keep-alive-bot-j0yl.onrender.com/ping'
 ].filter(Boolean);
-const PING_INTERVAL_MINUTES = process.env.PING_INTERVAL_MINUTES || 5;
-const SELF_PING_INTERVAL_MINUTES = 5; // Для Render Free Tier
-const PORT = process.env.PORT || 3000;
+const PING_INTERVAL_MINUTES = parseInt(process.env.PING_INTERVAL_MINUTES) || 5;
+const SELF_PING_INTERVAL_MINUTES = 5;
+const PORT = process.env.PORT || 3000; // Render автоматически задает PORT
 
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
+
+// Флаг для предотвращения дублирования cron
+let isCronInitialized = false;
 
 // Middleware для обработки веб-запросов
 app.use(express.json());
@@ -32,10 +35,10 @@ app.get('/ping', (req, res) => {
 // Функция для отправки уведомлений
 async function sendNotification(message) {
   try {
-    console.log('Отправка уведомления:', message);
+    console.log(`Отправка уведомления: ${message}`);
     await bot.telegram.sendMessage(YOUR_CHAT_ID, message, { parse_mode: 'HTML' });
   } catch (error) {
-    console.error('Ошибка отправки уведомления:', error.message);
+    console.error(`Ошибка отправки уведомления: ${error.message}`);
   }
 }
 
@@ -43,7 +46,7 @@ async function sendNotification(message) {
 async function pingSelf() {
   const selfUrl = 'https://keep-alive-bot-j0yl.onrender.com/ping';
   try {
-    console.log(`🔄 Начало самопинга: ${selfUrl}`);
+    console.log(`🔄 Начало самопинга: ${selfUrl} в ${new Date().toISOString()}`);
     const start = Date.now();
     const response = await axios.get(selfUrl, { timeout: 8000 });
     const pingTime = Date.now() - start;
@@ -74,14 +77,12 @@ async function pingServer(url, retries = 3) {
       return { success: true, pingTime };
     } catch (error) {
       console.warn(`Попытка ${i + 1}/${retries}: Ошибка пинга ${url} - ${error.message}`);
-
       if (i === retries - 1) {
         const failMessage = `❌ <b>Пинг неуспешен после ${retries} попыток</b>\n🔗 Сервер: ${url}\n❌ Ошибка: ${error.message}`;
         console.error(failMessage);
         await sendNotification(failMessage);
       }
-
-      if (i < retries - 1) await new Promise(resolve => setTimeout(resolve, 3000));
+      if (i < retries - 1) await new Promise(resolve => setTimeout(resolve, 5000)); // Увеличена задержка
     }
   }
   return { success: false };
@@ -102,15 +103,19 @@ async function pingAllServers() {
   const summaryMessage = `📊 <b>Итоги пинга:</b>\n✅ Успешно: ${success}\n❌ Ошибки: ${failed}\n⏰ ${new Date().toLocaleString()}`;
   console.log(summaryMessage);
   await sendNotification(summaryMessage);
-
   return results;
 }
 
 // Настройка расписания пингов
 function setupPingSchedule() {
+  if (isCronInitialized) {
+    console.log(`⚠️ Cron уже инициализирован, пропуск настройки в ${new Date().toISOString()}`);
+    return;
+  }
+  isCronInitialized = true;
   console.log(`⏰ Настройка расписания пингов в ${new Date().toISOString()}...`);
 
-  // Тестовая задача для проверки работы cron
+  // Тестовая задача для проверки cron
   cron.schedule('* * * * *', () => {
     console.log(`[Тест] Cron работает! Время: ${new Date().toLocaleTimeString()}`);
   });
@@ -121,11 +126,11 @@ function setupPingSchedule() {
     await pingAllServers();
   });
 
-  // Самопинг каждые 5 минут
-  cron.schedule(`*/${SELF_PING_INTERVAL_MINUTES} * * * *`, async () => {
-    console.log(`🔄 Запуск самопинга в ${new Date().toISOString()}...`);
+  // Альтернативный самопинг через setInterval, если cron не работает
+  setInterval(async () => {
+    console.log(`🔄 Альтернативный самопинг через setInterval в ${new Date().toISOString()}...`);
     await pingSelf();
-  });
+  }, SELF_PING_INTERVAL_MINUTES * 60 * 1000);
 
   // Первый пинг при запуске
   setTimeout(async () => {
@@ -140,24 +145,17 @@ function setupPingSchedule() {
 bot.command('start', (ctx) => {
   const welcomeMessage = `
 👋 <b>Привет, ${ctx.from.first_name}!</b>
-
 Я - бот для мониторинга серверов. Вот что я умею:
-
 🔹 Автоматически проверять доступность серверов
 🔹 Отправлять уведомления о проблемах
 🔹 Предоставлять текущий статус серверов
-
 <b>Доступные команды:</b>
 /start - Начальное сообщение
 /ping - Проверить все серверы сейчас
 /status - Текущий статус серверов
-
-⏳ Серверы проверяются автоматически каждые ${PING_INTERVAL_MINUTES} минут
-🔄 Самопинг выполняется каждые ${SELF_PING_INTERVAL_MINUTES} минут
-
-Для начала работы просто используйте команды меню или введите /ping для проверки серверов.
+⏳ Серверы проверяются каждые ${PING_INTERVAL_MINUTES} минут
+🔄 Самопинг каждые ${SELF_PING_INTERVAL_MINUTES} минут
   `;
-  
   ctx.reply(welcomeMessage, { parse_mode: 'HTML' });
 });
 
@@ -200,7 +198,7 @@ bot.command('status', async (ctx) => {
       { parse_mode: 'HTML' }
     );
   } catch (error) {
-    console.error('Ошибка проверки статуса:', error.message);
+    console.error(`Ошибка проверки статуса: ${error.message}`);
     await ctx.reply('⚠️ Ошибка при проверке статуса серверов');
   }
 });
@@ -208,7 +206,6 @@ bot.command('status', async (ctx) => {
 // Запуск сервера и бота
 app.listen(PORT, async () => {
   console.log(`🚀 HTTP сервер запущен на порту ${PORT} в ${new Date().toISOString()}`);
-
   try {
     await bot.launch();
     console.log(`🤖 Telegram бот успешно запущен в ${new Date().toISOString()}!`);
