@@ -7,18 +7,20 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '8147456024:AAEEoEG3_V2SI2F8iWxlToaWH
 const YOUR_CHAT_ID = process.env.YOUR_CHAT_ID || '5102803347';
 const TARGET_SERVERS = [
   'https://assistant-in-singing-tg.onrender.com/ping',
-  'https://keep-alive-bot-j0yl.onrender.com/ping',
-  'https://kruki.onrender.com'
-].filter(Boolean); // Временно убрали kruki.onrender.com
+  'https://kruki.onrender.com/',
+  'https://keep-alive-bot-j0yl.onrender.com/ping'
+].filter(Boolean);
 const PING_INTERVAL_MINUTES = parseInt(process.env.PING_INTERVAL_MINUTES) || 5;
 const SELF_PING_INTERVAL_MINUTES = 5;
-const PORT = process.env.PORT || 3000; // Render задает PORT автоматически
+const PORT = process.env.PORT || 3000;
+const WEBHOOK_URL = `https://keep-alive-bot-j0yl.onrender.com/bot${BOT_TOKEN}`;
 
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
 
 // Middleware для обработки веб-запросов
 app.use(express.json());
+app.use(bot.webhookCallback(`/bot${BOT_TOKEN}`));
 app.get('/ping', (req, res) => {
   console.log(`✅ Получен запрос на /ping от IP: ${req.ip} в ${new Date().toISOString()}`);
   res.status(200).json({
@@ -61,6 +63,7 @@ async function pingSelf() {
 
 // Функция для пинга сервера
 async function pingServer(url, retries = 3, delay = 5000) {
+  if (url === 'https://kruki.onrender.com/') delay = 10000; // Больший интервал для kruki
   for (let i = 0; i < retries; i++) {
     try {
       const start = Date.now();
@@ -185,7 +188,7 @@ bot.command('status', async (ctx) => {
     );
   } catch (error) {
     console.error(`Ошибка проверки статуса: ${error.message}`);
-    await ctx.reply('⚠️ Ошибка при проверке статуса серверов');
+    await ctx.reply('⚠️ Ошибка при проверки статуса серверов');
   }
 });
 
@@ -193,9 +196,12 @@ bot.command('status', async (ctx) => {
 app.listen(PORT, async () => {
   console.log(`🚀 HTTP сервер запущен на порту ${PORT} в ${new Date().toISOString()}`);
   try {
-    await bot.launch();
-    console.log(`🤖 Telegram бот успешно запущен в ${new Date().toISOString()}!`);
+    // Установка вебхука
+    await bot.telegram.setWebhook(WEBHOOK_URL);
+    console.log(`🤖 Вебхук установлен на ${WEBHOOK_URL} в ${new Date().toISOString()}`);
+    // Запуск расписания
     setupPingSchedule();
+    await sendNotification(`🤖 <b>Бот запущен с вебхуком!</b>\n🔗 Вебхук: ${WEBHOOK_URL}`);
   } catch (err) {
     console.error(`❌ Ошибка запуска бота: ${err.message}`);
     await sendNotification(`⚠️ <b>Ошибка запуска бота:</b> ${err.message}`);
@@ -204,14 +210,16 @@ app.listen(PORT, async () => {
 });
 
 // Обработка завершения работы
-process.once('SIGINT', () => {
+process.once('SIGINT', async () => {
   console.log('🛑 Получен SIGINT. Завершение работы бота...');
+  await bot.telegram.deleteWebhook();
   bot.stop('SIGINT');
   process.exit();
 });
 
-process.once('SIGTERM', () => {
+process.once('SIGTERM', async () => {
   console.log('🛑 Получен SIGTERM. Завершение работы бота...');
+  await bot.telegram.deleteWebhook();
   bot.stop('SIGTERM');
   process.exit();
 });
