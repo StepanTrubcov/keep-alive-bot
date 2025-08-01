@@ -1,6 +1,5 @@
 const { Telegraf } = require('telegraf');
 const axios = require('axios');
-const cron = require('node-cron');
 const express = require('express');
 
 // Конфигурация
@@ -8,18 +7,15 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '8147456024:AAEEoEG3_V2SI2F8iWxlToaWH
 const YOUR_CHAT_ID = process.env.YOUR_CHAT_ID || '5102803347';
 const TARGET_SERVERS = [
   'https://assistant-in-singing-tg.onrender.com/ping',
-  'https://kruki.onrender.com/',
-  'https://keep-alive-bot-j0yl.onrender.com/ping'
-].filter(Boolean);
+  'https://keep-alive-bot-j0yl.onrender.com/ping',
+  'https://kruki.onrender.com'
+].filter(Boolean); // Временно убрали kruki.onrender.com
 const PING_INTERVAL_MINUTES = parseInt(process.env.PING_INTERVAL_MINUTES) || 5;
 const SELF_PING_INTERVAL_MINUTES = 5;
-const PORT = process.env.PORT || 3000; // Render автоматически задает PORT
+const PORT = process.env.PORT || 3000; // Render задает PORT автоматически
 
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
-
-// Флаг для предотвращения дублирования cron
-let isCronInitialized = false;
 
 // Middleware для обработки веб-запросов
 app.use(express.json());
@@ -64,7 +60,7 @@ async function pingSelf() {
 }
 
 // Функция для пинга сервера
-async function pingServer(url, retries = 3) {
+async function pingServer(url, retries = 3, delay = 5000) {
   for (let i = 0; i < retries; i++) {
     try {
       const start = Date.now();
@@ -82,7 +78,7 @@ async function pingServer(url, retries = 3) {
         console.error(failMessage);
         await sendNotification(failMessage);
       }
-      if (i < retries - 1) await new Promise(resolve => setTimeout(resolve, 5000)); // Увеличена задержка
+      if (i < retries - 1) await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
   return { success: false };
@@ -108,29 +104,19 @@ async function pingAllServers() {
 
 // Настройка расписания пингов
 function setupPingSchedule() {
-  if (isCronInitialized) {
-    console.log(`⚠️ Cron уже инициализирован, пропуск настройки в ${new Date().toISOString()}`);
-    return;
-  }
-  isCronInitialized = true;
-  console.log(`⏰ Настройка расписания пингов в ${new Date().toISOString()}...`);
+  console.log(`⏰ Инициализация расписания пингов в ${new Date().toISOString()}...`);
 
-  // Тестовая задача для проверки cron
-  cron.schedule('* * * * *', () => {
-    console.log(`[Тест] Cron работает! Время: ${new Date().toLocaleTimeString()}`);
-  });
-
-  // Основной пинг всех серверов
-  cron.schedule(`*/${PING_INTERVAL_MINUTES} * * * *`, async () => {
-    console.log(`⏰ Запуск планового пинга серверов в ${new Date().toISOString()}...`);
-    await pingAllServers();
-  });
-
-  // Альтернативный самопинг через setInterval, если cron не работает
+  // Самопинг через setInterval
   setInterval(async () => {
-    console.log(`🔄 Альтернативный самопинг через setInterval в ${new Date().toISOString()}...`);
+    console.log(`🔄 Запуск самопинга через setInterval в ${new Date().toISOString()}...`);
     await pingSelf();
   }, SELF_PING_INTERVAL_MINUTES * 60 * 1000);
+
+  // Пинг всех серверов через setInterval
+  setInterval(async () => {
+    console.log(`⏰ Запуск планового пинга серверов в ${new Date().toISOString()}...`);
+    await pingAllServers();
+  }, PING_INTERVAL_MINUTES * 60 * 1000);
 
   // Первый пинг при запуске
   setTimeout(async () => {
@@ -212,6 +198,7 @@ app.listen(PORT, async () => {
     setupPingSchedule();
   } catch (err) {
     console.error(`❌ Ошибка запуска бота: ${err.message}`);
+    await sendNotification(`⚠️ <b>Ошибка запуска бота:</b> ${err.message}`);
     process.exit(1);
   }
 });
